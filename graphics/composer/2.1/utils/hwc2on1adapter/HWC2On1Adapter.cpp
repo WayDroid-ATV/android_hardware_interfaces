@@ -2218,7 +2218,7 @@ void HWC2On1Adapter::Layer::applyCompositionType(hwc_layer_1_t& hwc1Layer) {
         case Composition::Cursor:
             hwc1Layer.compositionType = HWC_FRAMEBUFFER;
             if (mDisplay.getDevice().getHwc1MinorVersion() >= 4) {
-                hwc1Layer.hints |= HWC_IS_CURSOR_LAYER;
+                hwc1Layer.flags |= HWC_IS_CURSOR_LAYER;
             }
             break;
         case Composition::Sideband:
