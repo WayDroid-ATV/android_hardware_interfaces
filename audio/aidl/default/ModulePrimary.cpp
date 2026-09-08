@@ -19,11 +19,13 @@
 #define LOG_TAG "AHAL_ModulePrimary"
 #include <Utils.h>
 #include <android-base/logging.h>
+#include <android-base/properties.h>
 
 #include "core-impl/ModulePrimary.h"
 #include "core-impl/StreamMmapStub.h"
 #include "core-impl/StreamOffloadStub.h"
 #include "core-impl/StreamPrimary.h"
+#include "core-impl/StreamPrimaryPulse.h"
 #include "core-impl/Telephony.h"
 
 using aidl::android::hardware::audio::common::areAllBitPositionFlagsSet;
@@ -39,6 +41,7 @@ using aidl::android::media::audio::common::AudioPort;
 using aidl::android::media::audio::common::AudioPortConfig;
 using aidl::android::media::audio::common::AudioPortExt;
 using aidl::android::media::audio::common::MicrophoneInfo;
+using android::base::GetBoolProperty;
 
 namespace aidl::android::hardware::audio::core {
 
@@ -71,6 +74,9 @@ ndk::ScopedAStatus ModulePrimary::createInputStream(StreamContext&& context,
         // "Stub" is used because there is no support for MMAP audio I/O on CVD.
         return createStreamInstance<StreamInMmapStub>(result, std::move(context), sinkMetadata,
                                                       microphones);
+    } else if (GetBoolProperty("ro.boot.audio.pulseaudio", true)) {
+        return createStreamInstance<StreamInPrimaryPulse>(result, std::move(context), sinkMetadata,
+                                                          microphones);
     }
     return createStreamInstance<StreamInPrimary>(result, std::move(context), sinkMetadata,
                                                  microphones);
@@ -91,6 +97,9 @@ ndk::ScopedAStatus ModulePrimary::createOutputStream(
         // playback over time.
         return createStreamInstance<StreamOutOffloadStub>(result, std::move(context),
                                                           sourceMetadata, offloadInfo);
+    } else if (GetBoolProperty("ro.boot.audio.pulseaudio", true)) {
+        return createStreamInstance<StreamOutPrimaryPulse>(result, std::move(context), sourceMetadata,
+                                                           offloadInfo);
     }
     return createStreamInstance<StreamOutPrimary>(result, std::move(context), sourceMetadata,
                                                   offloadInfo);

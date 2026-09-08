@@ -23,6 +23,7 @@ cc_defaults {
         "libnbaio_mono",
         "liblog",
         "libmedia_helper",
+        "libpulse",
         "libstagefright_foundation",
         "libtinyalsav2",
         "libutils",
@@ -74,6 +75,10 @@ cc_library {
         "deprecated/StreamSwitcher.cpp",
         "primary/PrimaryMixer.cpp",
         "primary/StreamPrimary.cpp",
+        "primary/StreamPrimaryPulse.cpp",
+        "pulse/Context.cpp",
+        "pulse/StreamPulse.cpp",
+        "pulse/Utils.cpp",
         "r_submix/ModuleRemoteSubmix.cpp",
         "r_submix/SubmixRoute.cpp",
         "r_submix/StreamRemoteSubmix.cpp",
@@ -374,6 +379,6 @@ prebuilt_etc {
     vendor: true,
     enabled: select(soong_config_variable("hardware_interfaces_audio", "use_default_audio_effects_config"), {
         true: true,
-        default: false,
+        default: true,
     }),
 }
