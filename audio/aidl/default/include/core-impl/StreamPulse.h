@@ -18,9 +18,12 @@
 #pragma once
 
 #include <atomic>
-#include <future>
-#include <memory>
 #include <optional>
+#include <thread>
+#include <vector>
+
+#include <media/nbaio/MonoPipe.h>
+#include <media/nbaio/MonoPipeReader.h>
 
 #include "Stream.h"
 #include "pulse/Context.h"
@@ -51,11 +54,6 @@ class StreamPulse : public StreamCommonImpl {
     ndk::ScopedAStatus setGain(float gain) override;
 
   protected:
-    const int mChannelCount;
-    const size_t mFrameSizeBytes;
-    const bool mIsInput;
-
-  private:
     struct StreamDeleter {
         std::shared_ptr<pulse::Context> mCtx;
         StreamDeleter(std::shared_ptr<pulse::Context> ctx) : mCtx(ctx) {}
@@ -72,10 +70,31 @@ class StreamPulse : public StreamCommonImpl {
         }
     };
 
-    const std::shared_ptr<pulse::Context> mPAContext;
+    const size_t mBufferSizeFrames;
+    const int mChannelCount;
+    const size_t mFrameSizeBytes;
+    const int mSampleRate;
+    const bool mIsInput;
 
-    std::atomic<int32_t> mLatency;
+    std::atomic<int32_t> mPALatency;
+    std::shared_ptr<pulse::Context> mPAContext;
     std::unique_ptr<pa_stream, StreamDeleter> mPAStream;
+
+  private:
+    void initMonoPipe(bool writeCanBlock);
+    void inputIoThread();
+    void outputIoThread();
+    void teardownIo();
+
+    // All fields below are only used on the worker thread.
+    std::atomic<bool> mPAReadyForWrite = true;
+    std::atomic<size_t> mPAWritableSize = 0;
+
+    // Only 'libnbaio_mono' is vendor-accessible, thus no access to the multi-reader Pipe.
+    ::android::sp<::android::MonoPipe> mSinkIo;
+    ::android::sp<::android::MonoPipeReader> mSourceIo;
+    std::vector<std::thread> mIoThreads;
+    std::atomic<bool> mIoThreadIsRunning = false;  // used by all threads
 };
 
 }  // namespace aidl::android::hardware::audio::core
