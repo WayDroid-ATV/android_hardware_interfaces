@@ -26,6 +26,7 @@
 
 #include "Stream.h"
 #include "alsa/Utils.h"
+#include "pulse/Context.h"
 
 namespace aidl::android::hardware::audio::core {
 
@@ -53,6 +54,22 @@ class StreamAlsa : public StreamCommonImpl {
     ndk::ScopedAStatus setGain(float gain) override;
 
   protected:
+    struct StreamDeleter {
+        std::shared_ptr<pulse::Context> mCtx;
+        StreamDeleter(std::shared_ptr<pulse::Context> ctx) : mCtx(ctx) {}
+
+        void operator()(pa_stream *s) const {
+            if (s == nullptr) return;
+
+            mCtx->withLock([&]() {
+                pa_stream_set_state_callback(s, nullptr, nullptr);
+                pa_stream_set_latency_update_callback(s, nullptr, nullptr);
+                pa_stream_disconnect(s);
+                pa_stream_unref(s);
+            });
+        }
+    };
+
     // Called from 'start' to initialize 'mAlsaDeviceProxies', the vector must be non-empty.
     virtual std::vector<alsa::DeviceProfile> getDeviceProfiles() = 0;
 
@@ -62,16 +79,22 @@ class StreamAlsa : public StreamCommonImpl {
     const bool mIsInput;
     const std::optional<struct pcm_config> mConfig;
     const int mReadWriteRetries;
+    const std::shared_ptr<pulse::Context> mPACtx;
+
+    std::unique_ptr<pa_stream, StreamDeleter> mPAStream;
 
   private:
     ::android::NBAIO_Format getPipeFormat() const;
     ::android::sp<::android::MonoPipe> makeSink(bool writeCanBlock);
     ::android::sp<::android::MonoPipeReader> makeSource(::android::MonoPipe* pipe);
+    unsigned getPALatency();
+    void registerOutputCallback();
     void inputIoThread(size_t idx);
     void outputIoThread(size_t idx);
     void teardownIo();
 
     std::atomic<float> mGain = 1.0;
+    std::atomic<int> mId;
 
     // All fields below are only used on the worker thread.
     std::vector<alsa::DeviceProxy> mAlsaDeviceProxies;

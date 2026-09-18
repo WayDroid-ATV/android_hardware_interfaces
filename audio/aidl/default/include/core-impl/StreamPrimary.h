@@ -32,16 +32,9 @@ class StreamPrimary : public StreamAlsa {
     StreamPrimary(StreamContext* context, const Metadata& metadata);
 
     // Methods of 'DriverInterface'.
-    ::android::status_t init(DriverCallbackInterface* callback) override;
-    ::android::status_t drain(StreamDescriptor::DrainMode mode) override;
-    ::android::status_t flush() override;
-    ::android::status_t pause() override;
-    ::android::status_t standby() override;
     ::android::status_t start() override;
-    ::android::status_t transfer(void* buffer, size_t frameCount, size_t* actualFrameCount,
-                                 int32_t* latencyMs) override;
-    ::android::status_t refinePosition(StreamDescriptor::Position* position) override;
-    void shutdown() override;
+    ::android::status_t transfer(void* buffer, size_t frameCount,
+                                            size_t* actualFrameCount, int32_t* latencyMs) override;
 
     // Overridden methods of 'StreamCommonImpl', called on a Binder thread.
     ndk::ScopedAStatus setConnectedDevices(const ConnectedDevices& devices) override;

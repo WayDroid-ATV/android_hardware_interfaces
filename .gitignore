@@ -2,3 +2,5 @@
 
 # Vim temporary files
 **/*.swp
+audio/aidl/default/include/core-impl/StreamPulse.h
+audio/aidl/default/pulse/StreamPulse.cpp

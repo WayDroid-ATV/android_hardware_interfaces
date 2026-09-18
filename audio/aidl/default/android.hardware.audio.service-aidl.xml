@@ -9,11 +9,13 @@
     <version>4</version>
     <fqname>IModule/r_submix</fqname>
   </hal>
+  <!-- Disabled in Waydroid
   <hal format="aidl">
     <name>android.hardware.audio.core</name>
     <version>4</version>
     <fqname>IModule/bluetooth</fqname>
   </hal>
+  -->
   <hal format="aidl">
     <name>android.hardware.audio.core</name>
     <version>4</version>

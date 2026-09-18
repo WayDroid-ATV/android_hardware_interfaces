@@ -46,43 +46,16 @@ StreamPrimary::StreamPrimary(StreamContext* context, const Metadata& metadata)
     context->startStreamDataProcessor();
 }
 
-::android::status_t StreamPrimary::init(DriverCallbackInterface* callback) {
-    RETURN_STATUS_IF_ERROR(mStubDriver.init(callback));
-    return StreamAlsa::init(callback);
-}
-
-::android::status_t StreamPrimary::drain(StreamDescriptor::DrainMode mode) {
-    return isStubStreamOnWorker() ? mStubDriver.drain(mode) : StreamAlsa::drain(mode);
-}
-
-::android::status_t StreamPrimary::flush() {
-    RETURN_STATUS_IF_ERROR(isStubStreamOnWorker() ? mStubDriver.flush() : StreamAlsa::flush());
-    // TODO(b/372951987): consider if this needs to be done from 'StreamInWorkerLogic::cycle'.
-    return mIsInput ? standby() : ::android::OK;
-}
-
-::android::status_t StreamPrimary::pause() {
-    return isStubStreamOnWorker() ? mStubDriver.pause() : StreamAlsa::pause();
-}
-
-::android::status_t StreamPrimary::standby() {
-    return isStubStreamOnWorker() ? mStubDriver.standby() : StreamAlsa::standby();
-}
-
 ::android::status_t StreamPrimary::start() {
-    bool isStub = true, shutdownAlsaStream = false;
+    bool shutdownAlsaStream = false;
     {
         std::lock_guard l(mLock);
-        isStub = mAlsaDeviceId == kStubDeviceId;
         shutdownAlsaStream =
                 mCurrAlsaDeviceId != mAlsaDeviceId && mCurrAlsaDeviceId != kStubDeviceId;
         mCurrAlsaDeviceId = mAlsaDeviceId;
     }
     if (shutdownAlsaStream) {
         StreamAlsa::shutdown();  // Close currently opened ALSA devices.
-    }
-    if (isStub) {
-        return mStubDriver.start();
     }
     RETURN_STATUS_IF_ERROR(StreamAlsa::start());
     mStartTimeNs = ::android::uptimeNanos();
@@ -93,9 +66,6 @@ StreamPrimary::StreamPrimary(StreamContext* context, const Metadata& metadata)
 
 ::android::status_t StreamPrimary::transfer(void* buffer, size_t frameCount,
                                             size_t* actualFrameCount, int32_t* latencyMs) {
-    if (isStubStreamOnWorker()) {
-        return mStubDriver.transfer(buffer, frameCount, actualFrameCount, latencyMs);
-    }
     // This is a workaround for the emulator implementation which has a host-side buffer
     // and is not being able to achieve real-time behavior similar to ADSPs (b/302587331).
     if (!mSkipNextTransfer) {
@@ -121,23 +91,13 @@ StreamPrimary::StreamPrimary(StreamContext* context, const Metadata& metadata)
             LOG(VERBOSE) << __func__ << ": sleeping for " << sleepTimeUs << " us";
             usleep(sleepTimeUs);
         } else {
+            LOG(WARNING) << __func__ << ": skip for offset " << totalOffsetUs << "us";
             mSkipNextTransfer = true;
         }
     } else {
         LOG(VERBOSE) << __func__ << ": asynchronous transfer";
     }
     return ::android::OK;
-}
-
-::android::status_t StreamPrimary::refinePosition(StreamDescriptor::Position*) {
-    // Since not all data is actually sent to the HAL, use the position maintained by Stream class
-    // which accounts for all frames passed from / to the client.
-    return ::android::OK;
-}
-
-void StreamPrimary::shutdown() {
-    StreamAlsa::shutdown();
-    mStubDriver.shutdown();
 }
 
 ndk::ScopedAStatus StreamPrimary::setConnectedDevices(const ConnectedDevices& devices) {

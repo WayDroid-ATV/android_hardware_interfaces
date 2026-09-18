@@ -27,6 +27,8 @@
 
 #include "core-impl/StreamAlsa.h"
 
+#include "pulse/Utils.h"
+
 using aidl::android::hardware::audio::common::getChannelCount;
 
 namespace aidl::android::hardware::audio::core {
@@ -38,7 +40,9 @@ StreamAlsa::StreamAlsa(StreamContext* context, const Metadata& metadata, int rea
       mSampleRate(getContext().getSampleRate()),
       mIsInput(isInput(metadata)),
       mConfig(alsa::getPcmConfig(getContext(), mIsInput)),
-      mReadWriteRetries(readWriteRetries) {}
+      mReadWriteRetries(readWriteRetries),
+      mPACtx(pulse::Context::getContext()),
+      mPAStream(nullptr, StreamDeleter(mPACtx)) {}
 
 StreamAlsa::~StreamAlsa() {
     cleanupWorker();
@@ -73,7 +77,69 @@ StreamAlsa::~StreamAlsa() {
 }
 
 ::android::status_t StreamAlsa::init(DriverCallbackInterface* /*callback*/) {
-    return mConfig.has_value() ? ::android::OK : ::android::NO_INIT;
+    ::android::status_t ret = ::android::OK;
+
+    if ((ret = mPACtx->init()) != ::android::OK) {
+        return ret;
+    }
+
+    mPACtx->withLock([&]() {
+        const pa_sample_spec sampleSpec = {
+            .format = pulse::getPASampleFormat(getContext().getFormat()),
+            .rate = static_cast<uint32_t>(getContext().getSampleRate()),
+            .channels = static_cast<uint8_t>(getChannelCount(getContext().getChannelLayout())),
+        };
+
+        const pa_buffer_attr bufAttr = {
+            .maxlength = static_cast<uint32_t>(-1),
+            .tlength = static_cast<uint32_t>(mBufferSizeFrames * mFrameSizeBytes),
+            .prebuf = static_cast<uint32_t>(mFrameSizeBytes),
+            .minreq = static_cast<uint32_t>(-1),
+            .fragsize = static_cast<uint32_t>(-1)
+        };
+
+        pa_stream_flags_t streamFlags = static_cast<pa_stream_flags_t>(
+            PA_STREAM_ADJUST_LATENCY |
+            PA_STREAM_AUTO_TIMING_UPDATE |
+            PA_STREAM_START_CORKED |
+            PA_STREAM_INTERPOLATE_TIMING
+        );
+
+        mPAStream.reset(pa_stream_new(mPACtx->mCtx.get(), "Waydroid", &sampleSpec, nullptr));
+        if (mPAStream == nullptr) {
+            ret = ::android::NO_INIT;
+            return;
+        }
+
+        // Register state callback
+        pa_stream_set_state_callback(mPAStream.get(), [](auto, void* userdata) {
+            pa_threaded_mainloop_signal(reinterpret_cast<pa_threaded_mainloop*>(userdata), 0);
+        }, mPACtx->mMainloop.get());
+
+        // Connect stream
+        int connectRet;
+        if (mIsInput) {
+            connectRet = pa_stream_connect_record(mPAStream.get(), nullptr, &bufAttr, streamFlags);
+        } else {
+            connectRet = pa_stream_connect_playback(mPAStream.get(), nullptr, &bufAttr, streamFlags, nullptr, nullptr);
+        }
+
+        // Wait until context is ready
+        if (connectRet == 0) {
+            while (pa_stream_get_state(mPAStream.get()) == PA_STREAM_CREATING) {
+                pa_threaded_mainloop_wait(mPACtx->mMainloop.get());
+            }
+        }
+    });
+
+    if (mPAStream == nullptr || pa_stream_get_state(mPAStream.get()) != PA_STREAM_READY) {
+        LOG(ERROR) << __func__ << ": failed to connect stream to sink: "
+                               << pa_strerror(pa_context_errno(mPACtx->mCtx.get()));
+
+        ret = ::android::NO_INIT;
+    }
+
+    return ret;
 }
 
 ::android::status_t StreamAlsa::drain(StreamDescriptor::DrainMode) {
@@ -91,7 +157,17 @@ StreamAlsa::~StreamAlsa() {
 }
 
 ::android::status_t StreamAlsa::pause() {
-    return ::android::OK;
+    if (mPAStream == nullptr) {
+        LOG(ERROR) << __func__ << ": PulseAudio stream not initialized";
+        return ::android::NO_INIT;
+    }
+
+    bool success = mPACtx->waitForOperation([&](auto cb, auto p) -> auto {
+        LOG(INFO) << __func__ << ": PulseAudio stream paused";
+        return pa_stream_cork(mPAStream.get(), 1, cb, p);
+    });
+
+    return success ? ::android::OK : ::android::INVALID_OPERATION;
 }
 
 ::android::status_t StreamAlsa::standby() {
@@ -100,6 +176,17 @@ StreamAlsa::~StreamAlsa() {
 }
 
 ::android::status_t StreamAlsa::start() {
+    if (mPAStream == nullptr) {
+        LOG(ERROR) << __func__ << ": PulseAudio stream not initialized";
+        return ::android::NO_INIT;
+    }
+
+    mPACtx->waitForOperation([&](auto cb, auto p) -> auto {
+        return pa_stream_cork(mPAStream.get(), 0, cb, p);
+    });
+
+    LOG(INFO) << __func__ << ": PulseAudio stream started";
+
     if (!mAlsaDeviceProxies.empty()) {
         // This is a resume after a pause.
         return ::android::OK;
@@ -186,46 +273,19 @@ StreamAlsa::~StreamAlsa() {
                 LOG(WARNING) << __func__ << ": sink " << i << " incomplete data sent, dropping "
                              << framesLost << " frames";
             }
-            maxLatency = std::max(maxLatency, proxy_get_latency(mAlsaDeviceProxies[i].get()));
         }
+
+        maxLatency = std::max(maxLatency, getPALatency());
     }
     *actualFrameCount = frameCount;
     maxLatency = std::min(maxLatency, static_cast<unsigned>(std::numeric_limits<int32_t>::max()));
     *latencyMs = maxLatency;
+
+    LOG(INFO) << "latency: " << maxLatency << " " << proxy_get_latency(mAlsaDeviceProxies[0].get());
     return ::android::OK;
 }
 
-::android::status_t StreamAlsa::refinePosition(StreamDescriptor::Position* position) {
-    if (mAlsaDeviceProxies.empty()) {
-        LOG(WARNING) << __func__ << ": no opened devices";
-        return ::android::NO_INIT;
-    }
-    // Since the proxy can only count transferred frames since its creation,
-    // we override its counter value with ours and let it to correct for buffered frames.
-    alsa::resetTransferredFrames(mAlsaDeviceProxies[0], position->frames);
-    if (mIsInput) {
-        if (int ret = proxy_get_capture_position(mAlsaDeviceProxies[0].get(), &position->frames,
-                                                 &position->timeNs);
-            ret != 0) {
-            LOG(WARNING) << __func__ << ": failed to retrieve capture position: " << ret;
-            return ::android::INVALID_OPERATION;
-        }
-    } else {
-        uint64_t hwFrames;
-        struct timespec timestamp;
-        if (int ret = proxy_get_presentation_position(mAlsaDeviceProxies[0].get(), &hwFrames,
-                                                      &timestamp);
-            ret == 0) {
-            if (hwFrames > std::numeric_limits<int64_t>::max()) {
-                hwFrames -= std::numeric_limits<int64_t>::max();
-            }
-            position->frames = static_cast<int64_t>(hwFrames);
-            position->timeNs = audio_utils_ns_from_timespec(&timestamp);
-        } else {
-            LOG(WARNING) << __func__ << ": failed to retrieve presentation position: " << ret;
-            return ::android::INVALID_OPERATION;
-        }
-    }
+::android::status_t StreamAlsa::refinePosition(StreamDescriptor::Position* /* position */) {
     return ::android::OK;
 }
 
@@ -236,6 +296,23 @@ void StreamAlsa::shutdown() {
 ndk::ScopedAStatus StreamAlsa::setGain(float gain) {
     mGain = gain;
     return ndk::ScopedAStatus::ok();
+}
+
+unsigned StreamAlsa::getPALatency() {
+    pa_usec_t latency;
+    int negative;
+
+    mPACtx->withLock([&]() {
+        if (pa_stream_get_latency(mPAStream.get(), &latency, &negative) < 0) {
+            LOG(WARNING) << __func__ << ": Failed to fetch latency info from PulseAudio";
+            latency = UINT32_MAX;
+        } else if (negative == 1) {
+            LOG(WARNING) << __func__ << ": Negative latency value reported by PulseAudio";
+            latency = 0;
+        }
+    });
+
+    return static_cast<int>(latency / PA_USEC_PER_MSEC);
 }
 
 void StreamAlsa::inputIoThread(size_t idx) {
@@ -285,6 +362,10 @@ void StreamAlsa::outputIoThread(size_t idx) {
             int ret = proxy_write_with_retries(mAlsaDeviceProxies[idx].get(), &buffer[0],
                                                framesReadOrError * mFrameSizeBytes,
                                                mReadWriteRetries);
+
+            ret = pa_stream_write(mPAStream.get(), &buffer[0], framesReadOrError * mFrameSizeBytes, nullptr, 0, PA_SEEK_RELATIVE);
+            LOG_IF(WARNING, ret < 0) << __func__ << ": Error writing into PulseAudio";
+
             // Errors when the stream is being stopped are expected.
             LOG_IF(WARNING, ret != 0 && mIoThreadIsRunning)
                     << __func__ << "[" << idx << "]: Error writing into ALSA: " << ret;
