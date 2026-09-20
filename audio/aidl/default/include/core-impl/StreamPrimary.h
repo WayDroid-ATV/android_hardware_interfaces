@@ -53,7 +53,6 @@ class StreamPrimary : public StreamAlsa {
     const bool mIsAsynchronous;
     int64_t mStartTimeNs = 0;
     long mFramesSinceStart = 0;
-    bool mSkipNextTransfer = false;
 
   private:
     using AlsaDeviceId = std::pair<int, int>;
