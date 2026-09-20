@@ -151,10 +151,7 @@ ndk::ScopedAStatus ModulePrimary::createMmapBuffer(const AudioPortConfig& portCo
 
 int32_t ModulePrimary::getNominalLatencyMs(const AudioPortConfig& portConfig) {
     static constexpr int32_t kLowLatencyMs = 10;
-    // 85 ms is chosen considering 4096 frames @ 48 kHz. This is the value which allows
-    // the virtual Android device implementation to pass CTS. Hardware implementations
-    // should have significantly lower latency.
-    static constexpr int32_t kStandardLatencyMs = 85;
+    static constexpr int32_t kStandardLatencyMs = 21;
     return hasMmapFlag(portConfig.flags.value()) ? kLowLatencyMs : kStandardLatencyMs;
 }
 
