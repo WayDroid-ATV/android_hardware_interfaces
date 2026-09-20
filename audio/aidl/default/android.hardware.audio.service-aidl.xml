@@ -12,14 +12,14 @@
   <hal format="aidl">
     <name>android.hardware.audio.core</name>
     <version>4</version>
-    <fqname>IModule/bluetooth</fqname>
-  </hal>
-  <hal format="aidl">
-    <name>android.hardware.audio.core</name>
-    <version>4</version>
     <fqname>IConfig/default</fqname>
   </hal>
   <!-- Uncomment when these modules present in the configuration
+  <hal format="aidl">
+    <name>android.hardware.audio.core</name>
+    <version>4</version>
+    <fqname>IModule/bluetooth</fqname>
+  </hal>
   <hal format="aidl">
     <name>android.hardware.audio.core</name>
     <version>4</version>
