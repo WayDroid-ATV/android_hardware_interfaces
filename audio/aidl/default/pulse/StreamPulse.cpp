@@ -85,17 +85,18 @@ StreamPulse::~StreamPulse() {
 
     mPACtx->withLock([&]() {
         // Calculate buffer size with target latency
-        const uint32_t bufferSize = pa_usec_to_bytes(mContext.getNominalLatencyMs() * PA_USEC_PER_MSEC, &mPASampleSpec);
+        const uint32_t bufferSize = pa_usec_to_bytes(mContext.getNominalLatencyMs() * PA_USEC_PER_MSEC,
+                                                     &mPASampleSpec);
 
         const pa_buffer_attr bufferAttr = {
-            .maxlength = mBufferSizeFrames * mFrameSizeBytes * 2,
+            .maxlength = static_cast<uint32_t>(mBufferSizeFrames * mFrameSizeBytes * 2),
             .tlength = bufferSize,
             .prebuf = static_cast<uint32_t>(-1),
             .minreq = static_cast<uint32_t>(-1),
             .fragsize = bufferSize,
         };
 
-        constexpr pa_stream_flags_t streamFlags = static_cast<pa_stream_flags_t>(
+        static constexpr pa_stream_flags_t streamFlags = static_cast<pa_stream_flags_t>(
             PA_STREAM_ADJUST_LATENCY |
             PA_STREAM_AUTO_TIMING_UPDATE |
             PA_STREAM_START_CORKED
@@ -104,7 +105,15 @@ StreamPulse::~StreamPulse() {
         const std::string streamName = std::format("Android {} @ {}Hz",
                                                    mIsInput ? "Record" : "Playback",
                                                    mPASampleSpec.rate);
-        mPAStream = pa_stream_new(mPACtx->mCtx.get(), streamName.c_str(), &mPASampleSpec, nullptr);
+
+        pa_proplist *props = pa_proplist_new();
+        pa_proplist_sets(props, PA_PROP_APPLICATION_ICON_NAME, "waydroid");
+        pa_proplist_sets(props, PA_PROP_APPLICATION_ID, "id.waydro.waydroid");
+
+        mPAStream = pa_stream_new_with_proplist(mPACtx->mCtx.get(), streamName.c_str(),
+                                                &mPASampleSpec, nullptr, props);
+
+        pa_proplist_free(props);
 
         if (mPAStream == nullptr) {
             ret = ::android::NO_INIT;
@@ -124,7 +133,8 @@ StreamPulse::~StreamPulse() {
         if (mIsInput) {
             connectRet = pa_stream_connect_record(mPAStream, nullptr, &bufferAttr, streamFlags);
         } else {
-            connectRet = pa_stream_connect_playback(mPAStream, nullptr, &bufferAttr, streamFlags, nullptr, nullptr);
+            connectRet = pa_stream_connect_playback(mPAStream, nullptr, &bufferAttr, streamFlags,
+                                                    nullptr, nullptr);
         }
 
         // Wait until context is ready
