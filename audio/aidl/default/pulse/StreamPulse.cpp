@@ -84,12 +84,15 @@ StreamPulse::~StreamPulse() {
     }
 
     mPACtx->withLock([&]() {
+        // Calculate buffer size with target latency
+        const uint32_t bufferSize = pa_usec_to_bytes(mContext.getNominalLatencyMs() * PA_USEC_PER_MSEC, &mPASampleSpec);
+
         const pa_buffer_attr bufferAttr = {
-            .maxlength = static_cast<uint32_t>(mBufferSizeFrames * mFrameSizeBytes * 2),
-            .tlength = static_cast<uint32_t>(pa_usec_to_bytes(21000, &mPASampleSpec)),
+            .maxlength = mBufferSizeFrames * mFrameSizeBytes * 2,
+            .tlength = bufferSize,
             .prebuf = static_cast<uint32_t>(-1),
             .minreq = static_cast<uint32_t>(-1),
-            .fragsize = static_cast<uint32_t>(mBufferSizeFrames * mFrameSizeBytes),
+            .fragsize = bufferSize,
         };
 
         constexpr pa_stream_flags_t streamFlags = static_cast<pa_stream_flags_t>(

@@ -42,6 +42,7 @@ using aidl::android::media::audio::common::AudioPortConfig;
 using aidl::android::media::audio::common::AudioPortExt;
 using aidl::android::media::audio::common::MicrophoneInfo;
 using android::base::GetBoolProperty;
+using android::base::GetIntProperty;
 
 namespace aidl::android::hardware::audio::core {
 
@@ -129,10 +130,8 @@ ndk::ScopedAStatus ModulePrimary::createMmapBuffer(const AudioPortConfig& portCo
     return ndk::ScopedAStatus::ok();
 }
 
-int32_t ModulePrimary::getNominalLatencyMs(const AudioPortConfig& portConfig) {
-    static constexpr int32_t kLowLatencyMs = 10;
-    static constexpr int32_t kStandardLatencyMs = 21;
-    return hasMmapFlag(portConfig.flags.value()) ? kLowLatencyMs : kStandardLatencyMs;
+int32_t ModulePrimary::getNominalLatencyMs(const AudioPortConfig& /* portConfig */) {
+    return GetIntProperty("ro.boot.audio.nominal_latency_ms", 21);
 }
 
 }  // namespace aidl::android::hardware::audio::core
