@@ -22,9 +22,11 @@
 #include <hidl/HidlTransportSupport.h>
 
 #include "BluetoothHci.h"
+#include "BluetoothProxy.h"
 
 using ::aidl::android::hardware::bluetooth::hal::IBluetoothHci_addService;
 using ::aidl::android::hardware::bluetooth::impl::BluetoothHci;
+using ::aidl::vendor::waydroid::bluetooth::impl::BluetoothProxy;
 using ::android::hardware::configureRpcThreadpool;
 using ::android::hardware::joinRpcThreadpool;
 
@@ -33,6 +35,14 @@ int main(int /* argc */, char** /* argv */) {
     if (!ABinderProcess_setThreadPoolMaxThreadCount(0)) {
         ALOGI("failed to set thread pool max thread count");
         return 1;
+    }
+
+    std::shared_ptr<BluetoothProxy> btProxy = ndk::SharedRefBase::make<BluetoothProxy>();
+    const std::string instanceName = std::string(BluetoothProxy::descriptor) + "/default";
+    binder_status_t status = AServiceManager_addService(btProxy->asBinder().get(), instanceName.c_str());
+
+    if (status != STATUS_OK) {
+        ALOGE("failed to register service");
     }
 
     IBluetoothHci_addService(new BluetoothHci());

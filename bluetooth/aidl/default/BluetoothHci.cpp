@@ -17,6 +17,7 @@
 #define LOG_TAG "android.hardware.bluetooth.service.default"
 
 #include "BluetoothHci.h"
+#include "BluetoothProxy.h"
 
 #include <cutils/properties.h>
 #include <fcntl.h>
@@ -159,8 +160,14 @@ void BluetoothHci::initialize(const std::shared_ptr<hal::IBluetoothHciCallbacks>
     }
 
     mCb = cb;
-    management_.reset(new NetBluetoothMgmt);
-    mFd = management_->openHci();
+
+    if (1 /* waydroid mode */) {
+        mFd = BluetoothProxy::openHciConnection();
+    } else {
+        management_.reset(new NetBluetoothMgmt);
+        mFd = management_->openHci();
+    }
+
     if (mFd < 0) {
         management_.reset();
 

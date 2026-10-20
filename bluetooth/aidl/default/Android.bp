@@ -4,12 +4,14 @@ package {
 
 cc_defaults {
     name: "android.hardware.bluetooth-service-build-defaults",
+    cpp_std: "c++20",
     cflags: [
         "-Wall",
         "-Wextra",
     ],
     shared_libs: [
         "android.hardware.bluetooth-V1-ndk",
+        "vendor.waydroid.bluetooth-V1-ndk",
         "libbase",
         "libbinder_ndk",
         "libcutils",
@@ -30,6 +32,7 @@ cc_library_static {
     defaults: ["android.hardware.bluetooth-service-build-defaults"],
     srcs: [
         "BluetoothHci.cpp",
+        "BluetoothProxy.cpp",
         "net_bluetooth_mgmt.cpp",
     ],
 }
