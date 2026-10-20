@@ -22,6 +22,7 @@
 #include <log/log.h>
 #include <poll.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -262,37 +263,58 @@ int NetBluetoothMgmt::rfkill(int block) {
 int NetBluetoothMgmt::openHci(int hci_interface) {
     ALOGI("opening hci interface %d", hci_interface);
 
-    // Unblock Bluetooth.
-    rfkill(0);
+    int fd;
+    if (0) {
+        // Unblock Bluetooth.
+        rfkill(0);
 
-    // Wait for the HCI interface to complete initialization or to come online.
-    int hci = waitHciDev(hci_interface);
-    if (hci < 0) {
-        ALOGE("hci interface %d not found", hci_interface);
-        return -1;
+        // Wait for the HCI interface to complete initialization or to come online.
+        int hci = waitHciDev(hci_interface);
+        if (hci < 0) {
+            ALOGE("hci interface %d not found", hci_interface);
+            return -1;
+        }
+
+        // Open the raw HCI socket.
+        fd = socket(AF_BLUETOOTH, SOCK_RAW, BTPROTO_HCI);
+        if (fd < 0) {
+            ALOGE("unable to open raw bluetooth socket: %s", strerror(errno));
+            return -1;
+        }
+
+        struct sockaddr_hci hci_addr = {
+                .hci_family = AF_BLUETOOTH,
+                .hci_dev = static_cast<uint16_t>(hci),
+                .hci_channel = HCI_CHANNEL_USER,
+        };
+
+        // Bind the socket to the selected interface.
+        if (bind(fd, (struct sockaddr*)&hci_addr, sizeof(hci_addr)) < 0) {
+            ALOGE("unable to bind bluetooth user channel: %s", strerror(errno));
+            ::close(fd);
+            return -1;
+        }
+
+        ALOGI("hci interface %d ready", hci);
+    } else {
+        fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (fd < 0) {
+            ALOGE("unable to open unix socket: %s", strerror(errno));
+            return -1;
+        }
+
+        struct sockaddr_un unix_addr = {
+                .sun_family = AF_UNIX,
+                .sun_path = "/dev/host_hci",
+        };
+
+        if (connect(fd, (struct sockaddr*)&unix_addr, sizeof(unix_addr)) < 0) {
+            ALOGE("unable to connect to host bluetooth relay server: %s", strerror(errno));
+            ::close(fd);
+            return -1;
+        }
     }
 
-    // Open the raw HCI socket.
-    int fd = socket(AF_BLUETOOTH, SOCK_RAW, BTPROTO_HCI);
-    if (fd < 0) {
-        ALOGE("unable to open raw bluetooth socket: %s", strerror(errno));
-        return -1;
-    }
-
-    struct sockaddr_hci hci_addr = {
-            .hci_family = AF_BLUETOOTH,
-            .hci_dev = static_cast<uint16_t>(hci),
-            .hci_channel = HCI_CHANNEL_USER,
-    };
-
-    // Bind the socket to the selected interface.
-    if (bind(fd, (struct sockaddr*)&hci_addr, sizeof(hci_addr)) < 0) {
-        ALOGE("unable to bind bluetooth user channel: %s", strerror(errno));
-        ::close(fd);
-        return -1;
-    }
-
-    ALOGI("hci interface %d ready", hci);
     bt_fd_ = fd;
     return fd;
 }
@@ -303,8 +325,10 @@ void NetBluetoothMgmt::closeHci() {
         bt_fd_ = -1;
     }
 
-    // Block Bluetooth.
-    rfkill(1);
+    if (0) {
+        // Block Bluetooth.
+        rfkill(1);
+    }
 }
 
 }  // namespace aidl::android::hardware::bluetooth::impl
